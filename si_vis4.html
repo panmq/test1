@@ -1,0 +1,317 @@
+根据你的需求，这里提供一个优化后的版本，专门处理sendTimers数据结构并优化布局：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spring Integration Flow</title>
+    <style>
+        #network-container {
+            width: 100%;
+            height: 90vh;
+            background: #f8f9fb;
+        }
+        .metric-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 2px 0;
+            font-size: 0.85em;
+        }
+    </style>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+    <div style="padding: 12px; background: white; border-bottom: 1px solid #eee;">
+        <button onclick="refresh()" style="background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px;">
+            ↻ Refresh
+        </button>
+        <span id="last-updated" style="margin-left: 15px; color: #666;"></span>
+    </div>
+    <div id="network-container"></div>
+
+    <script>
+        let network = null;
+        const componentConfig = {
+            messageChannel: {
+                shape: 'box',
+                color: '#e8f5e9',
+                border: '#4CAF50',
+                metrics: ['successes', 'failures']
+            },
+            messageHandler: {
+                shape: 'circle',
+                color: '#fff3e0',
+                border: '#FF9800',
+                metrics: ['successes']
+            },
+            errorChannel: {
+                shape: 'box',
+                color: '#ffebee',
+                border: '#f44336',
+                metrics: ['failures']
+            },
+            default: {
+                shape: 'box',
+                color: '#f5f5f5',
+                border: '#9e9e9e',
+                metrics: []
+            }
+        };
+
+        function createNetwork(data) {
+            const container = document.getElementById('network-container');
+            const options = {
+                nodes: {
+                    borderWidth: 2,
+                    margin: 15,
+                    font: {
+                        size: 12,
+                        face: 'Roboto, sans-serif',
+                        multi: 'html'
+                    },
+                    widthConstraint: {
+                        minimum: 180,
+                        maximum: 250
+                    }
+                },
+                edges: {
+                    arrows: 'to',
+                    smooth: false,
+                    color: '#BDBDBD',
+                    font: { size: 10 }
+                },
+                physics: {
+                    stabilization: {
+                        enabled: true,
+                        iterations: 200
+                    },
+                    barnesHut: {
+                        springLength: 200,
+                        avoidOverlap: 1,
+                        damping: 0.5
+                    }
+                }
+            };
+
+            const nodes = data.nodes.map(node => {
+                const config = componentConfig[node.componentType] || componentConfig.default;
+                return {
+                    id: node.nodeId,
+                    label: buildNodeLabel(node, config),
+                    shape: config.shape,
+                    color: {
+                        background: config.color,
+                        border: config.border
+                    },
+                    font: {
+                        color: '#212121'
+                    }
+                };
+            });
+
+            const edges = data.links.map(link => ({
+                from: link.from,
+                to: link.to,
+                label: link.type.toUpperCase()
+            }));
+
+            if (network) {
+                network.setData({ nodes, edges });
+            } else {
+                network = new vis.Network(container, { nodes, edges }, options);
+            }
+        }
+
+        function buildNodeLabel(node, config) {
+            const timers = node.sendTimers || {};
+            const metricEntries = config.metrics
+                .filter(m => timers[m])
+                .map(m => ({
+                    type: m,
+                    count: timers[m].count,
+                    mean: timers[m].mean.toFixed(1),
+                    max: timers[m].max.toFixed(1)
+                }));
+
+            return `
+                <div style="text-align:left; padding:8px">
+                    <div style="font-weight:500; margin-bottom:8px">${node.name}</div>
+                    <div style="color:#757575; font-size:0.9em; margin-bottom:6px">
+                        ${node.componentType}
+                    </div>
+                    ${metricEntries.map(entry => `
+                        <div style="margin-top:4px; padding:4px; 
+                            background:${getMetricBackground(entry.type)};
+                            border-radius:4px">
+                            <div style="color:${getMetricColor(entry.type)}; 
+                                font-weight:500">
+                                ${entry.type.toUpperCase()}
+                            </div>
+                            <div class="metric-item">
+                                <span>Count:</span>
+                                <b>${entry.count}</b>
+                            </div>
+                            <div class="metric-item">
+                                <span>Avg(ms):</span>
+                                <span>${entry.mean}</span>
+                            </div>
+                            <div class="metric-item">
+                                <span>Max(ms):</span>
+                                <span>${entry.max}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function getMetricColor(type) {
+            return type === 'successes' ? '#2E7D32' : '#D32F2F';
+        }
+
+        function getMetricBackground(type) {
+            return type === 'successes' ? '#E8F5E9' : '#FFEBEE';
+        }
+
+        async function refresh() {
+            try {
+                const res = await fetch('/actuator/integrationgraph');
+                const data = await res.json();
+                createNetwork(data.content);
+                document.getElementById('last-updated').textContent = 
+                    `Updated: ${new Date().toLocaleTimeString()}`;
+            } catch(err) {
+                console.error('Refresh failed:', err);
+            }
+        }
+
+        // 初始加载
+        refresh();
+        // 每10秒自动刷新
+        setInterval(refresh, 10000);
+    </script>
+</body>
+</html>
+```
+
+### 主要优化点说明：
+
+1. **sendTimers数据展示优化**：
+```javascript
+const metricEntries = config.metrics
+    .filter(m => timers[m])
+    .map(m => ({
+        type: m,
+        count: timers[m].count,
+        mean: timers[m].mean.toFixed(1),
+        max: timers[m].max.toFixed(1)
+    }));
+```
+
+2. **防重叠布局配置**：
+```javascript
+physics: {
+    stabilization: {
+        enabled: true,
+        iterations: 200  // 增加布局稳定计算次数
+    },
+    barnesHut: {
+        springLength: 200,  // 增加节点间距
+        avoidOverlap: 1,    // 强规避重叠
+        damping: 0.5       // 增加运动阻尼
+    }
+}
+```
+
+3. **组件类型专用配置**：
+```javascript
+const componentConfig = {
+    messageChannel: {
+        metrics: ['successes', 'failures'], // 显示全部指标
+        // ...
+    },
+    messageHandler: {
+        metrics: ['successes'], // 只显示成功指标
+        // ...
+    },
+    errorChannel: {
+        metrics: ['failures'] // 只显示失败指标
+    }
+};
+```
+
+4. **响应式节点宽度**：
+```javascript
+widthConstraint: {
+    minimum: 180,  // 保证指标显示完整
+    maximum: 250   // 防止节点过宽
+}
+```
+
+5. **可视化指标设计**：
+```javascript
+function getMetricColor(type) {
+    return type === 'successes' ? '#2E7D32' : '#D32F2F';
+}
+
+function getMetricBackground(type) {
+    return type === 'successes' ? '#E8F5E9' : '#FFEBEE';
+}
+```
+
+### 显示效果示例：
+
+对于消息通道节点：
+```
+[ OrderChannel ]
+Message Channel
+
+SUCCESSES
+Count: 1,234
+Avg(ms): 12.3
+Max(ms): 45.6
+
+FAILURES  
+Count: 5
+Avg(ms): 0.0
+Max(ms): 0.0
+```
+
+对于错误通道节点：
+```
+[ ErrorChannel ]
+Error Channel
+
+FAILURES
+Count: 12
+Avg(ms): 120.5 
+Max(ms): 500.0
+```
+
+### 高级布局参数建议：
+
+如果需要进一步优化布局，可以调整这些参数：
+```javascript
+physics: {
+    forceAtlas2Based: {
+        gravitationalConstant: -100, // 负值增加斥力
+        centralGravity: 0.005,
+        springLength: 200,
+        avoidOverlap: 1
+    },
+    solver: 'forceAtlas2Based',
+    stabilization: {
+        enabled: true,
+        iterations: 500,
+        updateInterval: 25
+    }
+}
+```
+
+该方案实现了：
+1. 根据组件类型自动适配显示内容
+2. 清晰的时间指标可视化
+3. 强制的防重叠布局
+4. 响应式指标卡片设计
+5. 自动的指标数值格式化（保留1位小数）
+6. 颜色语义化设计（成功绿/失败红）
